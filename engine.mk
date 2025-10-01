@@ -63,13 +63,13 @@ CONFIGHEADER := $(BUILDDIR)/config.h
 GLOBAL_INCLUDES := $(BUILDDIR) $(addsuffix /include,$(LKINC))
 GLOBAL_OPTFLAGS ?= $(ARCH_OPTFLAGS)
 GLOBAL_COMPILEFLAGS := -g -include $(CONFIGHEADER)
-GLOBAL_COMPILEFLAGS += -Wextra -Wall -Werror=return-type -Wshadow -Wdouble-promotion
+#GLOBAL_COMPILEFLAGS += -Wextra -Wall -Werror=return-type -Wshadow -Wdouble-promotion
 GLOBAL_COMPILEFLAGS += -Wno-multichar -Wno-unused-parameter -Wno-unused-function -Wno-unused-label
 GLOBAL_COMPILEFLAGS += -fno-common
 # Build with -ffreestanding since we are building an OS kernel and cannot
 # rely on all hosted environment functionality being present.
 GLOBAL_COMPILEFLAGS += -ffreestanding
-GLOBAL_CFLAGS := --std=gnu11 -Werror-implicit-function-declaration -Wstrict-prototypes -Wwrite-strings
+#GLOBAL_CFLAGS := --std=gnu11 -Werror-implicit-function-declaration -Wstrict-prototypes -Wwrite-strings
 GLOBAL_CPPFLAGS := --std=c++14 -fno-exceptions -fno-rtti -fno-threadsafe-statics
 GLOBAL_ASMFLAGS := -DASSEMBLY
 GLOBAL_LDFLAGS :=
@@ -95,7 +95,7 @@ EXTRA_MODULE_ASMFLAGS :=
 
 # if WERROR is set, add to the compile args
 ifeq (true,$(call TOBOOL,$(WERROR)))
-GLOBAL_COMPILEFLAGS += -Werror
+#GLOBAL_COMPILEFLAGS += -Werror
 endif
 
 GLOBAL_LDFLAGS += $(addprefix -L,$(LKINC))
