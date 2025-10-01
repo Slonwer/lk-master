@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# TODO: try to merge this with other architecture's do-qemu scripts if possible
+
+# host operating system
+HOST_OS=$(uname -s)
+
+# host architecture
+HOST_OS_ARCH=$(uname -m)
+case $HOST_OS_ARCH in
+  aarch64*|arm64)
+    # flatten either aarch64 or arm64 to arm64 to keep it simple
+    HOST_OS_ARCH="arm64"
+    ;;
+  *) ;;
+esac
+readonly HOST_OS
+readonly HOST_OS_ARCH
+
+# echo HOST_OS = "$HOST_OS"
+# echo HOST_OS_ARCH = "$HOST_OS_ARCH"
+
+function HELP {
+    echo "help:"
+    echo "-p <project>      : specify the project to build (default qemu-virt-arm32-test, qemu-virt-arm64-test or lm3s6965evb-test)"
+    echo "-6                : 64bit arm"
+    echo "-3                : cortex-m3 based platform"
+    echo "-P <page size>    : set the page size (default: 4K)"
+    echo "-v                : boot kernel at EL2"
+    echo "-k                : use KVM or HVF acceleration if present (only on 64bit)"
+    echo "-m <memory in MB>"
+    echo "-s <number of cpus>"
+    echo
+    echo "-c                : cmpctmalloc instead of dlmalloc"
+    echo "-M                : miniheap instead of dlmalloc"
+    echo
+    echo "-d <disk image>   : a virtio disk device"
+    echo "-n                : a virtio network device"
+    echo "-t                : a virtio tap network device"
+    echo "-g                : a virtio display"
+    echo "-f <shared dir>   : a virtio 9p device with a host shared directory"
+    echo
+    echo "-h for help"
+    echo "all arguments after -- are passed to qemu directly"
+    exit 1
+}
+
+DO_NET=0
+DO_NET_TAP=0
+DO_DISK=0
+DISK_IMAGE=""
+DO_64BIT=0
+DO_VIRT=0
+DO_CORTEX_M3=0
+DO_KVM=0
+DO_DISPLAY=0
+DO_CMPCTMALLOC=0
+DO_MINIHEAP=0
+DO_V9P=0
+DO_V9P_DIR=""
+PAGE_SIZE=4096
+SMP=1
+MEMSIZE=512
+SUDO=""
+PROJECT=""
+
+while getopts cd:ghkm:Mnt36vp:P:s:f: FLAG; do
+    case $FLAG in
+        c) DO_CMPCTMALLOC=1;;
+        d) DO_DISK=1; DISK_IMAGE=$OPTARG;;
+        g) DO_DISPLAY=1;;
+        f) DO_V9P=1; DO_V9P_DIR=$OPTARG;;
+        k) DO_KVM=1;;
+        M) DO_MINIHEAP=1;;
+        n) DO_NET=1;;
+        t) DO_NET_TAP=1;;
+        3) DO_CORTEX_M3=1;;
+        6) DO_64BIT=1;;
+        v) DO_VIRT=1;;
+        m) MEMSIZE=$OPTARG;;
+        s) SMP=$OPTARG;;
+        p) PROJECT=$OPTARG;;
+        P) PAGE_SIZE=$OPTARG;;
+        h) HELP;;
+        \?)
+            echo unrecognized option
+            HELP
+    esac
+done
+
+shift $((OPTIND-1))
+
+# accept some aliases to page size
+if [ "$PAGE_SIZE" == "4k" ]; then
+    PAGE_SIZE=4096
+elif [ "$PAGE_SIZE" == "16k" ]; then
+    PAGE_SIZE=16384
+elif [ "$PAGE_SIZE" == "64k" ]; then
+    PAGE_SIZE=65536
+fi
+
+# pick the appropriate qemu and project
+if (( DO_64BIT )); then
+    QEMU="qemu-system-aarch64"
+    CPU="cortex-a76" # default to something recent that modern qemu supports
+    MACHINE="virt"
+    # if using KVM/HVF, switch to a host cpu and enable acceleration
+    if (( DO_KVM )); then
+        CPU="host"
+        if [ "$HOST_OS" == "Darwin" ]; then
+            MACHINE+=",gic_version=2,accel=hvf"
+        elif [ "$HOST_OS" == "Linux" ]; then
+            MACHINE+=",gic_version=host,accel=kvm"
+        fi
+    elif [ $DO_VIRT == 1 ]; then
+        MACHINE+=",virtualization=on"
+    fi
+    if [ "$PAGE_SIZE" == 65536 ]; then
+        _PROJECT="qemu-virt-arm64-64k-test"
+    elif [ "$PAGE_SIZE" == 16384 ]; then
+        _PROJECT="qemu-virt-arm64-16k-test"
+    else
+        _PROJECT="qemu-virt-arm64-test"
+    fi
+elif (( DO_CORTEX_M3 )); then
+    QEMU="qemu-system-arm"
+    CPU="cortex-m3"
+    MACHINE="lm3s6965evb"
+    _PROJECT="lm3s6965evb-test"
+else
+    QEMU="qemu-system-arm"
+    CPU="cortex-a15"
+    MACHINE="virt"
+    MACHINE+=",highmem=off" # disable the high PCI ECAM, since we dont support LPAE to map it
+    _PROJECT="qemu-virt-arm32-test"
+fi
+
+# allow overriding the project from the environment
+if [ -z "$PROJECT" ]; then
+    PROJECT=$_PROJECT
+fi
+
+# TODO: move ARGS to an array to avoid issues with spaces in paths
+ARGS=" -cpu $CPU -m $MEMSIZE -smp $SMP -machine $MACHINE -kernel build-${PROJECT}/lk.elf"
+
+if (( DO_DISK )); then
+    ARGS+=" -drive if=none,file=${DISK_IMAGE},id=blk,format=raw"
+    ARGS+=" -device virtio-blk-device,drive=blk"
+fi
+
+if (( DO_NET )); then
+    ARGS+=" -netdev user,id=vmnic,hostname=qemu "
+    ARGS+=" -device virtio-net-device,netdev=vmnic"
+elif (( DO_NET_TAP )); then
+    # quick note to enable tap interface
+    # IFNAME=qemu0
+    # BRIDGE=bridge0
+    # sudo tunctl -u $(whoami) -t ${IFNAME}
+    # sudo ifconfig ${IFNAME} up
+    # sudo ip link set ${IFNAME} master ${BRIDGE}
+    ARGS+=" -netdev tap,id=vmnic,ifname=qemu0,script=no,downscript=no"
+    ARGS+=" -device virtio-net-device,netdev=vmnic"
+    #SUDO="sudo "
+else
+    NO_NET_ARGS=" -net none"
+    ARGS+=$NO_NET_ARGS
+fi
+
+if (( DO_DISPLAY )); then
+    ARGS+=" -device virtio-gpu-device -serial stdio"
+    ARGS+=" -device virtio-keyboard-device"
+    ARGS+=" -device virtio-mouse-device"
+else
+    ARGS+=" -nographic"
+fi
+
+if (( DO_V9P )); then
+    ARGS+=" -fsdev local,path=$DO_V9P_DIR,security_model=mapped,id=v9p0"
+    ARGS+=" -device virtio-9p-device,fsdev=v9p0,mount_tag=V9P0"
+fi
+
+MAKE_VARS=""
+
+if (( DO_CMPCTMALLOC )); then
+    MAKE_VARS="LK_HEAP_IMPLEMENTATION=cmpctmalloc"
+elif (( DO_MINIHEAP )); then
+    MAKE_VARS="LK_HEAP_IMPLEMENTATION=miniheap"
+fi
+
+set -e
+"$DIR"/make-parallel $MAKE_VARS PROJECT="$PROJECT"
+echo "$SUDO" $QEMU $ARGS "$@"
+$SUDO $QEMU $ARGS "$@"
