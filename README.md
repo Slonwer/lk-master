@@ -49,3 +49,6 @@ OpenRISC 1000
 VAX (experimental)
 - <img width="1147" height="329" alt="Captura de tela de 2025-09-30 21-58-19" src="https://github.com/user-attachments/assets/6031c4c9-6c0b-4918-b034-64c4bb01423c" />
 
+
+compilador (" make CROSS_COMPILE=aarch64-linux-gnu- PROJECT=qemu-virt-arm64-test -j$(nproc)")
+
